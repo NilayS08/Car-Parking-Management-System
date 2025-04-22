@@ -1,7 +1,3 @@
-Perfect — thanks for the updated details! Here's a clean and clear version of your README sections tailored exactly to your setup (1 ultrasonic sensor for parking, IR for entry, LCD screen, no buzzer, etc.):
-
----
-
 ## 📝 **Problem Statement**
 
 In crowded urban environments, efficient and automated parking management is a growing need. Manual monitoring is time-consuming and error-prone. This project addresses the problem by designing a compact **Smart Parking Management System** that automates vehicle detection, entry control, and availability indication using sensors and microcontroller-based logic.
