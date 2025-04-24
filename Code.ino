@@ -1,46 +1,49 @@
-#include <Servo.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
 // Pin Configuration
 #define IR_SENSOR_PIN 2
-#define SERVO_PIN 4
-#define TRIG_PIN 5
-#define ECHO_PIN 6
-#define LED_PIN1 7
-#define LED_PIN2 8
+#define TRIG_PIN1 5
+#define ECHO_PIN1 6
+#define TRIG_PIN2 9  // Second ultrasonic sensor trig pin
+#define ECHO_PIN2 10 // Second ultrasonic sensor echo pin
+#define LED_PIN1 7   // LED for spot 1
+#define LED_PIN2 8   // LED for spot 2
+#define ENTRY_LED_PIN 4  // Using former servo pin for entry indicator LED
 
 // Constants
 #define TOTAL_SPOTS 2
 #define DISTANCE_THRESHOLD_CM 15
-#define GATE_OPEN_ANGLE 0
-#define GATE_CLOSED_ANGLE 90
-#define GATE_DELAY 3000
 #define LCD_UPDATE_INTERVAL 500
 #define MAX_DISTANCE 200
 #define DEBOUNCE_DELAY 500
+#define ENTRY_LED_DURATION 3000  // How long entry LED stays on
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
-Servo gateServo;
 
 int availableSpots = TOTAL_SPOTS;
 bool isSpot1Occupied = false;
 bool isSpot2Occupied = false;
-bool isGateOpen = false;
+bool isEntryLedOn = false;
 
 unsigned long lastDistanceCheck = 0;
 unsigned long lastLCDUpdate = 0;
-unsigned long gateOpenTime = 0;
+unsigned long entryLedOnTime = 0;
 unsigned long lastIRTrigger = 0;
 
 void setup() {
   Serial.begin(9600);
 
   pinMode(IR_SENSOR_PIN, INPUT);
-  pinMode(TRIG_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
+  pinMode(TRIG_PIN1, OUTPUT);
+  pinMode(ECHO_PIN1, INPUT);
+  pinMode(TRIG_PIN2, OUTPUT);
+  pinMode(ECHO_PIN2, INPUT);
   pinMode(LED_PIN1, OUTPUT);
   pinMode(LED_PIN2, OUTPUT);
+  pinMode(ENTRY_LED_PIN, OUTPUT);
+
+  digitalWrite(ENTRY_LED_PIN, LOW);
 
   lcd.init();
   lcd.backlight();
@@ -49,9 +52,6 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("System v1.3");
   delay(2000);
-
-  gateServo.attach(SERVO_PIN);
-  gateServo.write(GATE_CLOSED_ANGLE);
 
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -63,7 +63,8 @@ void loop() {
   unsigned long currentMillis = millis();
 
   if (currentMillis - lastDistanceCheck >= 200) {
-    checkSpot1(); // Only spot 1 has ultrasonic sensor
+    checkSpot1();
+    checkSpot2();
     lastDistanceCheck = currentMillis;
   }
 
@@ -73,24 +74,24 @@ void loop() {
   }
 
   checkIRSensor(currentMillis);
-  checkGateTimeout(currentMillis);
+  checkEntryLedTimeout(currentMillis);
   updateLEDs();
 }
 
-float getDistance() {
-  digitalWrite(TRIG_PIN, LOW);
+float getDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
-  digitalWrite(TRIG_PIN, HIGH);
+  digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
+  digitalWrite(trigPin, LOW);
 
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+  long duration = pulseIn(echoPin, HIGH, 30000);
   float distance = duration * 0.0343 / 2;
   return (distance <= 0 || distance > MAX_DISTANCE) ? MAX_DISTANCE : distance;
 }
 
 void checkSpot1() {
-  float distance = getDistance();
+  float distance = getDistance(TRIG_PIN1, ECHO_PIN1);
   bool carDetected = (distance < DISTANCE_THRESHOLD_CM);
 
   if (carDetected && !isSpot1Occupied) {
@@ -104,41 +105,57 @@ void checkSpot1() {
   }
 }
 
+void checkSpot2() {
+  float distance = getDistance(TRIG_PIN2, ECHO_PIN2);
+  bool carDetected = (distance < DISTANCE_THRESHOLD_CM);
+
+  if (carDetected && !isSpot2Occupied) {
+    isSpot2Occupied = true;
+    availableSpots = max(0, availableSpots - 1);
+    Serial.println("Car detected in Spot 2");
+  } else if (!carDetected && isSpot2Occupied) {
+    isSpot2Occupied = false;
+    availableSpots = min(TOTAL_SPOTS, availableSpots + 1);
+    Serial.println("Spot 2 now vacant");
+  }
+}
+
 void checkIRSensor(unsigned long currentMillis) {
   if (digitalRead(IR_SENSOR_PIN) == LOW && currentMillis - lastIRTrigger > DEBOUNCE_DELAY) {
     lastIRTrigger = currentMillis;
 
-    if (!isGateOpen && availableSpots > 0) {
-      Serial.println("IR Triggered: Opening Gate");
-      openGate();
-      isGateOpen = true;
-      gateOpenTime = currentMillis;
-
-      // Auto-assign next free spot (only Spot 2 is logic-based)
-      if (!isSpot1Occupied && !isSpot2Occupied) {
-        // Spot 1 will be handled by ultrasonic
-      } else if (!isSpot2Occupied) {
-        isSpot2Occupied = true;
-        availableSpots = max(0, availableSpots - 1);
-        Serial.println("Assuming car went to Spot 2");
+    if (availableSpots > 0) {
+      Serial.println("IR Triggered: Entry allowed");
+      turnOnEntryLed();
+      isEntryLedOn = true;
+      entryLedOnTime = currentMillis;
+    } else {
+      Serial.println("IR Triggered: No spots available");
+      // Optional: Add a different signal for when no spots are available
+      // Like blinking the entry LED briefly
+      for (int i = 0; i < 3; i++) {
+        digitalWrite(ENTRY_LED_PIN, HIGH);
+        delay(200);
+        digitalWrite(ENTRY_LED_PIN, LOW);
+        delay(200);
       }
     }
   }
 }
 
-void openGate() {
-  gateServo.write(GATE_OPEN_ANGLE);
+void turnOnEntryLed() {
+  digitalWrite(ENTRY_LED_PIN, HIGH);
 }
 
-void closeGate() {
-  gateServo.write(GATE_CLOSED_ANGLE);
+void turnOffEntryLed() {
+  digitalWrite(ENTRY_LED_PIN, LOW);
 }
 
-void checkGateTimeout(unsigned long currentMillis) {
-  if (isGateOpen && currentMillis - gateOpenTime >= GATE_DELAY) {
-    closeGate();
-    isGateOpen = false;
-    Serial.println("Closing Gate (timeout)");
+void checkEntryLedTimeout(unsigned long currentMillis) {
+  if (isEntryLedOn && currentMillis - entryLedOnTime >= ENTRY_LED_DURATION) {
+    turnOffEntryLed();
+    isEntryLedOn = false;
+    Serial.println("Entry LED turning off (timeout)");
   }
 }
 
