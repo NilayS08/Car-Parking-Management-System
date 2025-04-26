@@ -7,9 +7,8 @@
 #define ECHO_PIN1 6
 #define TRIG_PIN2 9  // Second ultrasonic sensor trig pin
 #define ECHO_PIN2 10 // Second ultrasonic sensor echo pin
-#define LED_PIN1 7   // LED for spot 1
-#define LED_PIN2 8   // LED for spot 2
 #define ENTRY_LED_PIN 4  // Using former servo pin for entry indicator LED
+#define LDR_DO_PIN 12  // Digital output from LDR module
 
 // Constants
 #define TOTAL_SPOTS 2
@@ -25,6 +24,7 @@ int availableSpots = TOTAL_SPOTS;
 bool isSpot1Occupied = false;
 bool isSpot2Occupied = false;
 bool isEntryLedOn = false;
+bool isNight = false;
 
 unsigned long lastDistanceCheck = 0;
 unsigned long lastLCDUpdate = 0;
@@ -39,8 +39,6 @@ void setup() {
   pinMode(ECHO_PIN1, INPUT);
   pinMode(TRIG_PIN2, OUTPUT);
   pinMode(ECHO_PIN2, INPUT);
-  pinMode(LED_PIN1, OUTPUT);
-  pinMode(LED_PIN2, OUTPUT);
   pinMode(ENTRY_LED_PIN, OUTPUT);
 
   digitalWrite(ENTRY_LED_PIN, LOW);
@@ -75,7 +73,18 @@ void loop() {
 
   checkIRSensor(currentMillis);
   checkEntryLedTimeout(currentMillis);
-  updateLEDs();
+
+  isNight = (digitalRead(LDR_DO_PIN) == LOW);  // LOW = Dark, HIGH = Bright
+
+  // Optional behavior based on day/night
+  if (isNight) {
+    lcd.backlight(); 
+    Serial.println("It is dark - Night Mode");
+  }  
+  else {
+    lcd.noBacklight();  // Save power during daytime
+    Serial.println("It is bright - Day Mode");
+  }
 }
 
 float getDistance(int trigPin, int echoPin) {
@@ -173,9 +182,4 @@ void updateLCD() {
   lcd.setCursor(8, 1);
   lcd.print("S2:");
   lcd.print(isSpot2Occupied ? "Full" : "Free");
-}
-
-void updateLEDs() {
-  digitalWrite(LED_PIN1, isSpot1Occupied ? HIGH : LOW);
-  digitalWrite(LED_PIN2, isSpot2Occupied ? HIGH : LOW);
 }
